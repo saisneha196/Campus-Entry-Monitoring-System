@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Development rules - more permissive for testing
+    
+    // Users collection
+    match /users/{userId} {
+      // Allow authenticated users to read/write their own data
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Allow any authenticated user to read basic user info (needed for role checks)
+      allow read: if request.auth != null;
+    }
+    
+    // Visits collection - Allow anonymous access for visitor management
+    match /visits/{visitId} {
+      // Allow anyone to create visits (visitor registration)
+      allow create: if true;
+      
+      // Allow anyone to read visits (for phone lookup and QR scanning)
+      allow read: if true;
+      
+      // Allow anyone to update visits (for check-in status updates)
+      allow update: if true;
+      
+      // No deletes for safety
+      allow delete: if false;
+    }
+    
+    // Cab entries collection - Allow anonymous access
+    match /cabEntries/{entryId} {
+      // Allow anyone to create and read cab entries
+      allow create, read: if true;
+      
+      // Allow updates for status changes
+      allow update: if true;
+      
+      // No deletes for safety
+      allow delete: if false;
+    }
+    
+    // All other collections - allow authenticated users
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+
+// Note: For production, use more restrictive rules
+// These development rules are more permissive to allow testing without complex setup

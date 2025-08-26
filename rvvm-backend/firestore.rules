@@ -1,0 +1,94 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function hasRole(role) {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+    
+    function isHost() {
+      return hasRole('host');
+    }
+    
+    function isSecurity() {
+      return hasRole('security');
+    }
+    
+    function isHostOrSecurity() {
+      return isHost() || isSecurity();
+    }
+    
+    // Users collection - users can read/write their own profile
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      // Allow hosts and security to read basic user info
+      allow read: if isHostOrSecurity();
+    }
+    
+    // Visits collection - main visitor data
+    match /visits/{visitId} {
+      // Anyone can create a visit (visitor registration)
+      allow create: if true;
+      
+      // Visitors can read their own visits
+      allow read: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+      
+      // Hosts can read visits where they are the person to meet
+      allow read: if isHost() && resource.data.whomToMeetEmail == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email;
+      
+      // Security can read all visits
+      allow read: if isSecurity();
+      
+      // Hosts can update visits assigned to them (approve/reject)
+      allow update: if isHost() && 
+        resource.data.whomToMeetEmail == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email &&
+        // Only allow updating status and approval fields
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'isApproved', 'approvedBy', 'approvedAt']);
+      
+      // Security can update visits for check-in/check-out
+      allow update: if isSecurity() &&
+        // Only allow updating entry/exit related fields
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'entryTime', 'exitTime', 'checkedInBy', 'checkedOutBy']);
+      
+      // No deletes allowed except by the system
+      allow delete: if false;
+    }
+    
+    // Hosts collection - for host management
+    match /hosts/{hostId} {
+      allow read, write: if isOwner(hostId) || isHostOrSecurity();
+    }
+    
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // System can create notifications
+      allow create: if isHostOrSecurity();
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Reports collection - for analytics (hosts and security only)
+    match /reports/{reportId} {
+      allow read, write: if isHostOrSecurity();
+    }
+    
+    // Settings collection - system configuration
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isSecurity(); // Only security can update system settings
+    }
+  }
+}
